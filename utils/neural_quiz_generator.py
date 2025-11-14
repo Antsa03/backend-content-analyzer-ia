@@ -54,15 +54,23 @@ def generate_quiz_neural(text: str, num_questions: int = 20) -> List[Dict]:
     try:
         # Extraction des phrases et entités importantes
         sentences = split_sentences(text, min_words=8)
+        logger.info(f"📝 {len(sentences)} phrases extraites du texte")
+
         if not sentences:
+            logger.error("❌ Aucune phrase extraite!")
             return []
 
         # Extraction des mots-clés avec TF-IDF
         keyword_tuples = extract_keywords(sentences, max_keywords=50)
+        logger.info(f"🔑 {len(keyword_tuples)} mots-clés extraits")
+
         entities = find_named_entities(text)
+        logger.info(f"👤 {len(entities)} entités nommées trouvées")
 
         # Récupération du modèle neuronal
+        logger.info("🤖 Chargement du modèle neuronal de quiz...")
         quiz_gen = model_manager.get_quiz_generator()
+        logger.info("✅ Modèle neuronal chargé")
 
         questions = []
         used_sentences = set()
@@ -71,18 +79,28 @@ def generate_quiz_neural(text: str, num_questions: int = 20) -> List[Dict]:
         selected_sentences = _select_informative_sentences(
             sentences, keyword_tuples, min(num_questions * 2, len(sentences))
         )
+        logger.info(
+            f"📋 {len(selected_sentences)} phrases sélectionnées pour génération"
+        )
 
-        for sentence in selected_sentences:
+        for idx, sentence in enumerate(selected_sentences, 1):
             if len(questions) >= num_questions:
                 break
 
             if sentence in used_sentences:
                 continue
 
+            logger.info(f"\n{'='*60}")
+            logger.info(f"🔄 Tentative {idx}/{len(selected_sentences)}")
+            logger.info(f"📄 Phrase: {sentence[:100]}...")
+
             # Extraction de la réponse candidate (entité ou mot-clé)
             answer = _extract_answer_from_sentence(sentence, keyword_tuples, entities)
             if not answer:
+                logger.warning(f"⚠️ Pas de réponse candidate trouvée pour cette phrase")
                 continue
+
+            logger.info(f"💡 Réponse candidate: {answer}")
 
             # Génération de la question avec le réseau de neurones et prompts FR optimisés
             question_text = quiz_gen.generate_question(
@@ -91,15 +109,18 @@ def generate_quiz_neural(text: str, num_questions: int = 20) -> List[Dict]:
                 max_length=80,  # ✅ Augmenté pour questions FR complètes
             )
 
+            logger.info(f"🔍 Question générée: {question_text}")
+
             # Validation plus stricte pour questions françaises
             if (
                 not question_text or len(question_text.split()) < 5
             ):  # ✅ Min 5 mots au lieu de 4
+                logger.warning(f"⚠️ Question trop courte ignorée: {question_text}")
                 continue
 
             # ✅ Vérifier que c'est une vraie question en français
             if not _is_valid_french_question(question_text):
-                logger.debug(f"❌ Question invalide ignorée: {question_text}")
+                logger.warning(f"❌ Question invalide ignorée: {question_text}")
                 continue
 
             # Génération des distracteurs (mauvaises réponses)
@@ -247,15 +268,20 @@ def _is_valid_french_question(question: str) -> bool:
         True si la question est valide, False sinon
     """
     if not question or len(question.strip()) < 5:
+        logger.debug(f"❌ Question trop courte: {question}")
         return False
 
     question_lower = question.lower().strip()
 
-    # Doit se terminer par un point d'interrogation
-    if not question.endswith("?"):
+    # Vérifier absence de mots interdits
+    forbidden_words = ["[unk]", "<unk>", "undefined", "null", "error"]
+    has_forbidden = any(word in question_lower for word in forbidden_words)
+
+    if has_forbidden:
+        logger.debug(f"❌ Question avec mots interdits: {question}")
         return False
 
-    # Mots de début de question valides en français
+    # Mots de début de question valides en français (liste étendue)
     valid_starters = [
         "quel",
         "quelle",
@@ -286,15 +312,40 @@ def _is_valid_french_question(question: str) -> bool:
         "identifiez",
         "définissez",
         "expliquez",
+        "décrivez",
+        "indiquez",
+        "précisez",
+        "mentionnez",
+        "énumérez",
+        "listez",
+        "à quel",
+        "de quel",
+        "pour quel",
+        "avec quel",
+        "par quel",
+        "générez",
+        "générer",
+        "donner",
+        "donnez",
+        "répondre",
+        "répondez",
     ]
 
     starts_valid = any(question_lower.startswith(starter) for starter in valid_starters)
 
-    # Vérifier absence de mots interdits
-    forbidden_words = ["[unk]", "<unk>", "undefined", "null", "error"]
-    has_forbidden = any(word in question_lower for word in forbidden_words)
+    # Si ne commence pas par un mot de question valide, mais contient un '?', accepter quand même
+    if not starts_valid and question.endswith("?"):
+        logger.debug(f"⚠️ Question acceptée malgré début non standard: {question}")
+        return True
 
-    return starts_valid and not has_forbidden
+    # Si commence par un mot valide, accepter même sans '?'
+    if starts_valid:
+        if not question.endswith("?"):
+            logger.debug(f"⚠️ Question sans '?' mais début valide: {question}")
+        return True
+
+    logger.debug(f"❌ Question rejetée: {question}")
+    return False
 
 
 def generate_quiz_hybrid(text: str, num_questions: int = 20) -> dict:

@@ -281,16 +281,21 @@ class NeuralQuizGenerator:
             Question générée en français
         """
         try:
-            # Prompt engineering optimisé pour le français
+            # Prompt engineering optimisé pour FLAN-T5 avec instructions très explicites
             if answer:
-                # Prompt français structuré pour T5
+                # Format question-réponse explicite pour FLAN-T5
                 input_text = (
-                    f"Générez une question en français basée sur cette information. "
-                    f"Réponse attendue: {answer}. Contexte: {context}"
+                    f"Question en français sur: {context[:250]}\n"
+                    f"La réponse devrait être: {answer}\n"
+                    f"Posez la question:"
                 )
             else:
-                # Prompt alternatif sans réponse
-                input_text = f"Posez une question pertinente en français à partir du texte suivant: {context}"
+                # Instruction claire pour générer une question
+                input_text = (
+                    f"Lisez ce texte et posez une question en français:\n"
+                    f"{context[:250]}\n"
+                    f"Question:"
+                )
 
             inputs = self.tokenizer(
                 input_text,
@@ -325,14 +330,16 @@ class NeuralQuizGenerator:
                 question.strip(), context, answer
             )
 
+            logger.info(f"✅ Question générée: {question}")
+
             return question
 
         except Exception as e:
             logger.error(f"❌ Erreur lors de la génération de question: {e}")
             # Fallback intelligent en français
             if answer:
-                return f"Quel est le terme manquant : {context[:80]}... (Réponse: ______) ?"
-            return f"Quelle information peut-on extraire de : {context[:60]}... ?"
+                return f"Quel est le terme qui correspond à : {answer} ?"
+            return f"Quelle est l'information principale de ce texte ?"
 
     def generate_distractor(
         self,
@@ -422,14 +429,14 @@ class NeuralQuizGenerator:
         """
         if not question or len(question.strip()) < 5:
             # Fallback si question vide
+            logger.warning("⚠️ Question vide ou trop courte, utilisation du fallback")
             if answer:
-                return (
-                    f"Quel est le terme manquant dans ce contexte : {context[:80]}... ?"
-                )
-            return f"Quelle information peut-on extraire du texte suivant ?"
+                return f"Quel est le terme qui correspond à : {answer} ?"
+            return f"Quelle est l'information principale de ce texte ?"
 
         # Nettoyage de base
         question = question.strip()
+        logger.info(f"🔍 Validation de la question: '{question}'")
 
         # Vérifier les mots interdits
         forbidden = ["[UNK]", "<unk>", "undefined", "null"]
@@ -437,7 +444,7 @@ class NeuralQuizGenerator:
             if word.lower() in question.lower():
                 logger.warning(f"⚠️  Mot interdit détecté dans la question: {word}")
                 if answer:
-                    return f"Quelle est la réponse correcte concernant {answer} dans ce contexte ?"
+                    return f"Quelle est la réponse concernant {answer} ?"
                 return f"Quelle information principale est présente dans ce passage ?"
 
         # S'assurer qu'il y a un point d'interrogation
@@ -460,12 +467,14 @@ class NeuralQuizGenerator:
             starts_with_question = any(
                 question.lower().startswith(starter) for starter in question_starters
             )
-            if starts_with_question:
-                question = question.rstrip(".") + "?"
+            if starts_with_question or len(question.split()) < 15:
+                # Ajouter le point d'interrogation
+                question = question.rstrip(".") + " ?"
+                logger.info(f"➕ Point d'interrogation ajouté")
 
         # Limiter la longueur (max 200 caractères)
         if len(question) > 200:
-            question = question[:197] + "...?"
+            question = question[:197] + "... ?"
 
         # Capitaliser le début
         if question and question[0].islower():
